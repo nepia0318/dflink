@@ -3,7 +3,7 @@
 set +eu
 
 LIST_FILE="${DFLINK_YAML:-"${XDG_DATA_HOME:-"${HOME}"/.local/share}"/dflist/dflist.yml}"
-DF_ROOT=${DFLINK_DOTFILES_ROOT:-""${HOME}"/.dflink"}
+DF_ROOT=${DFLINK_DOTFILES_ROOT:-"${HOME}/.dflink"}
 DF_ROOT=${DF_ROOT%/}
 
 # Show command usage
