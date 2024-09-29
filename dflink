@@ -4,6 +4,7 @@ set +eu
 
 LIST_FILE="${DFLINK_YAML:-"${XDG_DATA_HOME:-"${HOME}"/.local/share}"/dflist/dflist.yml}"
 DF_ROOT=${DFLINK_DOTFILES_ROOT:-""${HOME}"/.dflink"}
+DF_ROOT=${DF_ROOT%/}
 
 # Show command usage
 show_usage() {
@@ -50,108 +51,129 @@ convert_home_env_to_home_dir() {
 # Add file
 add() {
     local package="$1"
-    local file="$2"
-    file=$(to_absolute_path "$file")
+    local directory="$2"
+    local file="$3"
 
-    local directory
-    directory=$(dirname "$file")
+    # IF file not exists
+    if [ ! -f "$file" ]; then
+        echo "File not exists: $file"
+        return
+    fi
+
+    file=$(to_absolute_path "$file")
+    # echo "$package, $directory, $file" && exit
+
+    local target_dir
+    target_dir=$(dirname "$file")
     local filename
     filename=$(basename "$file")
 
-    directory=$(convert_home_dir_to_home_env "$directory")
+    target_dir=$(convert_home_dir_to_home_env "$target_dir")
+
+    local dup_pkgs
+    dup_pkgs="$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\") | parent(4) | .name" "$LIST_FILE")"
+    if [ "$dup_pkgs" != '' ]; then
+        echo "File already exists: $target_dir/$filename"
+        echo "Containing Library: ${dup_pkgs//$'\n'/, }"
+        return
+    fi
 
     # Check package
     local package_index
     package_index="$(yq ".packages | to_entries[] | select(.value.name == \"$package\") | key" "$LIST_FILE")"
 
     if [ "$package_index" = '' ]; then
+        # New package
         package_index="$(yq '.packages | length' "$LIST_FILE")"
-    fi
-
-    if [ "$(yq ".packages[$package_index].name" "$LIST_FILE")" != "$package" ]; then
         yq -i ".packages[$package_index].name = \"$package\"" "$LIST_FILE"
     fi
 
     # Check directory
     local dir_index
     dir_index="$(yq ".packages[$package_index].directories | to_entries[] | select(.value.path == \"$directory\") | key" "$LIST_FILE")"
+    local dir_length
+    dir_length="$(yq ".packages[$package_index].directories | length" "$LIST_FILE")"
 
     if [ "$dir_index" = '' ]; then
-        dir_index="$(yq ".packages[$package_index].directories | length" "$LIST_FILE")"
-    fi
-
-    if [ "$(yq ".packages[$package_index].directories[$dir_index].path" "$LIST_FILE")" != "$directory" ]; then
+        # New directory
+        dir_index="$dir_length"
         yq -i ".packages[$package_index].directories[$dir_index].path = \"$directory\"" "$LIST_FILE"
     fi
 
     # Check file
     local file_index
-    file_index="$(yq ".packages[$package_index].directories[$dir_index].files | to_entries[] | select(.value == \"$filename\") | key" "$LIST_FILE")"
-
-    if [ "$file_index" = '' ]; then
-        file_index="$(yq ".packages[$package_index].directories[$dir_index].files | length" "$LIST_FILE")"
-        yq -i ".packages[$package_index].directories[$dir_index].files[$file_index] = \"$filename\"" "$LIST_FILE"
-        echo "Added: [$package] $directory/$filename."
-    else
-        echo "File already exists."
-    fi
+    file_index="$(yq ".packages[$package_index].directories[$dir_index].files | length" "$LIST_FILE")"
+    yq -i ".packages[$package_index].directories[$dir_index].files[$file_index].target_dir = \"$target_dir\"" "$LIST_FILE"
+    yq -i ".packages[$package_index].directories[$dir_index].files[$file_index].name = \"$filename\"" "$LIST_FILE"
+    echo "Added: [$package] $target_dir/$filename."
 }
 
 # Remove file
 remove() {
-    local package="$1"
-    local file="$2"
+    local file="$1"
     file=$(to_absolute_path "$file")
 
-    local directory
-    directory=$(dirname "$file")
+    local target_dir
+    target_dir=$(dirname "$file")
     local filename
     filename=$(basename "$file")
 
-    directory=$(convert_home_dir_to_home_env "$directory")
+    target_dir=$(convert_home_dir_to_home_env "$target_dir")
 
-    if [ ! "$(yq "[.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | . == \"$filename\"] | any" "$LIST_FILE")" == "true" ]; then
-        echo "[$package] $directory/$filename not exists."
+    # If file isn't exists.
+    if [ "$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\")" "$LIST_FILE")" == '' ]; then
+        echo "File not exists: $target_dir/$filename."
         return
     fi
 
+    # Get file information from list file
+    local package
+    package="$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\") | parent(4) | .name" "$LIST_FILE")"
+    local directory
+    directory="$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\") | parent(2) | .path" "$LIST_FILE")"
+
     # Remove file
-    yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | select(. == \"$filename\"))" "$LIST_FILE"
+    yq -i "del(.packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\"))" "$LIST_FILE"
+
+    # echo "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$LIST_FILE")"
+    # echo "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$LIST_FILE")"
 
     # Remove directory if files is empty
     if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$LIST_FILE")" -eq 0 ]; then
         yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\"))" "$LIST_FILE"
     fi
+
     # Remove package if directories is empty
     if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$LIST_FILE")" -eq 0 ]; then
         yq -i "del(.packages[] | select(.name == \"$package\"))" "$LIST_FILE"
     fi
 
-    echo "Removed: [$package] $directory/$filename."
+    echo "Removed: [$package] $target_dir/$filename."
 }
 
 # Add file recursively
 add_recursive() {
     local package="$1"
     local directory="$2"
+    local target_dir="$3"
 
-    find "$directory" -type f -o -type l | while read -r file; do
-        add "$package" "$file"
+    find "$target_dir" -type f -o -type l | while read -r file; do
+        add "$package" "$directory" "$file"
     done
 }
 
 # Remove file recursively
 remove_recursive() {
-    local package="$1"
-    local directory="$2"
+    local target_dir="$1"
 
-    find "$directory" -type f -o -type l | while read -r file; do
-        remove "$package" "$file"
+    find "$target_dir" -type f -o -type l | while read -r file; do
+        remove "$file"
     done
 }
 
 # Sync symbolick link
 sync() {
+    echo "WIP" && exit
     local pkgs_length
     pkgs_length="$(yq ".packages | length" "$LIST_FILE")"
 
@@ -184,7 +206,7 @@ sync() {
                 target="$dir/$file"
                 echo "target: $target"
 
-                # If file not exists
+                # Skip if not exists
                 if [ ! -f "$target" ]; then
                     echo "Not exists: $target"
                     echo "---------------------------------------------------------"
@@ -224,6 +246,26 @@ sync() {
     done
 }
 
+repo_check() {
+    find "$DF_ROOT" -maxdepth 1 -type d  -print0 | while IFS= read -r -d '' dir; do
+        if [ "$dir" = "${DF_ROOT}" ]; then
+            continue
+        fi
+        local pkg
+        pkg="${dir#"${DF_ROOT}/"}"
+        echo "[$pkg]"
+        find "$dir" -type f -name '???*' -print0 | while IFS= read -r -d '' file; do
+            local rel_path
+            rel_path=$(convert_home_dir_to_home_env "$(dirname "$file")")
+            echo "path: $rel_path"
+            rel_dir=$(dirname "${file#"${DF_ROOT}/$pkg"}")
+            echo "dir: $rel_dir"
+            filename=$(basename "$file")
+            echo "name: $filename"
+        done
+    done
+}
+
 # Main
 
 # Create file if not exists
@@ -240,35 +282,45 @@ case "$1" in
                 show_usage
                 exit 1
             fi
-            add_recursive "$3" "$4"
+            if [ $# -eq 4 ]; then
+                add_recursive "$3" "." "$4"
+            else
+                add_recursive "$3" "$4" "$5"
+            fi
         elif [ $# -lt 3 ]; then
             echo "Error: Insufficient arguments"
             show_usage
             exit 1
+        elif [ $# -eq 3 ]; then
+            add "$2" "." "$3"
         else
-            add "$2" "$3"
+            add "$2" "$3" "$4"
         fi
         ;;
 
     rm)
         if [ "$2" = "-r" ]; then
-            if [ $# -lt 4 ]; then
+            if [ $# -lt 3 ]; then
                 echo "Error: Insufficient arguments for recursive remove"
                 show_usage
                 exit 1
             fi
-            remove_recursive "$3" "$4"
-        elif [ $# -lt 3 ]; then
+            remove_recursive "$3"
+        elif [ $# -lt 2 ]; then
             echo "Error: Insufficient arguments"
             show_usage
             exit 1
         else
-            remove "$2" "$3"
+            remove "$2"
         fi
         ;;
 
     sync)
         sync
+        ;;
+
+    check)
+        repo_check
         ;;
 
     show)
