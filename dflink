@@ -1,0 +1,196 @@
+#!/bin/bash
+
+set +eu
+
+CONFIG_FILE="${DFLINK_YAML:-"${XDG_DATA_HOME:-"${HOME}"/.local/share}"/dflist/dflist.yml}"
+
+# Show command usage
+show_usage() {
+    echo "Usage: $0 {add|rm} [-r] [package] [file|directory]"
+    echo "  add: Add a file or directory to the list"
+    echo "      -r: Recursive operation (for directories)"
+    echo "  rm: Remove a file or directory from the list"
+    echo "      -r: Recursive operation (for directories)"
+    echo "  show: Show lnlist.yaml"
+    echo "  [package]: Name of the package"
+    echo "  [file|directory]: Full path to the file or directory"
+    echo "Example: $0 add bash ~/.bash_history"
+    echo "         $0 add -r vim ~/.vim"
+}
+
+# Escape special charactors
+escape_special_chars() {
+    echo "$1" | sed 's/[]\/$*.^[]/\\&/g'
+}
+
+# Transform arg path to absolute_path
+to_absolute_path() {
+    local path="$1"
+    if [[ "$path" != /* ]]; then
+        path="$(cd "$(dirname "$path")" || exit; pwd)/$(basename "$path")"
+    fi
+    echo "$path"
+}
+
+# Convert home directory to ${HOME}
+convert_home_dir_to_home_env() {
+    local directory="$1"
+    echo "${directory/#$HOME/\${HOME\}}"
+}
+
+# Add file
+add() {
+    local package="$1"
+    local file="$2"
+    file=$(to_absolute_path "$file")
+
+    local directory
+    directory=$(dirname "$file")
+    local filename
+    filename=$(basename "$file")
+
+    directory=$(convert_home_dir_to_home_env "$directory")
+
+    # Check package
+    local package_index
+    package_index="$(yq ".packages | to_entries[] | select(.value.name == \"$package\") | key" "$CONFIG_FILE")"
+
+    if [ "$package_index" = '' ]; then
+        package_index="$(yq '.packages | length' "$CONFIG_FILE")"
+    fi
+
+    if [ "$(yq ".packages[$package_index].name" "$CONFIG_FILE")" != "$package" ]; then
+        yq -i ".packages[$package_index].name = \"$package\"" "$CONFIG_FILE"
+    fi
+
+    # Check directory
+    local dir_index
+    dir_index="$(yq ".packages[$package_index].directories | to_entries[] | select(.value.path == \"$directory\") | key" "$CONFIG_FILE")"
+
+    if [ "$dir_index" = '' ]; then
+        dir_index="$(yq ".packages[$package_index].directories | length" "$CONFIG_FILE")"
+    fi
+
+    if [ "$(yq ".packages[$package_index].directories[$dir_index].path" "$CONFIG_FILE")" != "$directory" ]; then
+        yq -i ".packages[$package_index].directories[$dir_index].path = \"$directory\"" "$CONFIG_FILE"
+    fi
+
+    # Check file
+    local file_index
+    file_index="$(yq ".packages[$package_index].directories[$dir_index].files | to_entries[] | select(.value == \"$filename\") | key" "$CONFIG_FILE")"
+
+    if [ "$file_index" = '' ]; then
+        file_index="$(yq ".packages[$package_index].directories[$dir_index].files | length" "$CONFIG_FILE")"
+        yq -i ".packages[$package_index].directories[$dir_index].files[$file_index] = \"$filename\"" "$CONFIG_FILE"
+        echo "Added [$package] $directory/$filename."
+    else
+        echo "File already exists."
+    fi
+}
+
+# Remove file
+remove() {
+    local package="$1"
+    local file="$2"
+    file=$(to_absolute_path "$file")
+
+    local directory
+    directory=$(dirname "$file")
+    local filename
+    filename=$(basename "$file")
+
+    directory=$(convert_home_dir_to_home_env "$directory")
+
+    if [ ! "$(yq "[.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | . == \"$filename\"] | any" "$CONFIG_FILE")" == "true" ]; then
+        echo "[$package] $directory/$filename not exists."
+        return
+    fi
+
+    # Remove file
+    yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | select(. == \"$filename\"))" "$CONFIG_FILE"
+
+    # Remove directory if files is empty
+    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$CONFIG_FILE")" -eq 0 ]; then
+        yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\"))" "$CONFIG_FILE"
+    fi
+    # Remove package if directories is empty
+    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$CONFIG_FILE")" -eq 0 ]; then
+        yq -i "del(.packages[] | select(.name == \"$package\"))" "$CONFIG_FILE"
+    fi
+
+    echo "Removeed [$package] $directory/$filename."
+}
+
+# Add file recursively
+add_recursive() {
+    local package="$1"
+    local directory="$2"
+
+    find "$directory" -type f -o -type l | while read -r file; do
+        add "$package" "$file"
+    done
+}
+
+# Remove file recursively
+remove_recursive() {
+    local package="$1"
+    local directory="$2"
+
+    find "$directory" -type f -o -type l | while read -r file; do
+        remove "$package" "$file"
+    done
+}
+
+# Main
+
+# Create file if not exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    yq --null-input '{"packages": []}' > "$CONFIG_FILE"
+fi
+
+case "$1" in
+    add)
+        if [ "$2" = "-r" ]; then
+            if [ $# -lt 4 ]; then
+                echo "Error: Insufficient arguments for recursive add"
+                show_usage
+                exit 1
+            fi
+            add_recursive "$3" "$4"
+        elif [ $# -lt 3 ]; then
+            echo "Error: Insufficient arguments"
+            show_usage
+            exit 1
+        else
+            add "$2" "$3"
+        fi
+        ;;
+
+    rm)
+        if [ "$2" = "-r" ]; then
+            if [ $# -lt 4 ]; then
+                echo "Error: Insufficient arguments for recursive remove"
+                show_usage
+                exit 1
+            fi
+            remove_recursive "$3" "$4"
+        elif [ $# -lt 3 ]; then
+            echo "Error: Insufficient arguments"
+            show_usage
+            exit 1
+        else
+            remove "$2" "$3"
+        fi
+        ;;
+
+    show)
+        bat "$CONFIG_FILE"
+        ;;
+
+    *)
+        echo "Error: Invalid command '$1'"
+        show_usage
+        exit 1
+        ;;
+esac
