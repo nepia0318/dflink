@@ -2,7 +2,8 @@
 
 set +eu
 
-CONFIG_FILE="${DFLINK_YAML:-"${XDG_DATA_HOME:-"${HOME}"/.local/share}"/dflist/dflist.yml}"
+LIST_FILE="${DFLINK_YAML:-"${XDG_DATA_HOME:-"${HOME}"/.local/share}"/dflist/dflist.yml}"
+DF_ROOT=${DFLINK_DOTFILES_ROOT:-""${HOME}"/.dflink"}
 
 # Show command usage
 show_usage() {
@@ -11,7 +12,9 @@ show_usage() {
     echo "      -r: Recursive operation (for directories)"
     echo "  rm: Remove a file or directory from the list"
     echo "      -r: Recursive operation (for directories)"
-    echo "  show: Show lnlist.yaml"
+    echo "  show: Show lnlist.yaml."
+    echo "  edit: Edit lnlist.yaml. (Use \$EDITOR)"
+    echo "  help: Show help."
     echo "  [package]: Name of the package"
     echo "  [file|directory]: Full path to the file or directory"
     echo "Example: $0 add bash ~/.bash_history"
@@ -38,6 +41,12 @@ convert_home_dir_to_home_env() {
     echo "${directory/#$HOME/\${HOME\}}"
 }
 
+# Convert ${HOME} to home directory
+convert_home_env_to_home_dir() {
+    local directory="$1"
+    echo "${directory/#\${HOME\}/$HOME}"
+}
+
 # Add file
 add() {
     local package="$1"
@@ -53,36 +62,36 @@ add() {
 
     # Check package
     local package_index
-    package_index="$(yq ".packages | to_entries[] | select(.value.name == \"$package\") | key" "$CONFIG_FILE")"
+    package_index="$(yq ".packages | to_entries[] | select(.value.name == \"$package\") | key" "$LIST_FILE")"
 
     if [ "$package_index" = '' ]; then
-        package_index="$(yq '.packages | length' "$CONFIG_FILE")"
+        package_index="$(yq '.packages | length' "$LIST_FILE")"
     fi
 
-    if [ "$(yq ".packages[$package_index].name" "$CONFIG_FILE")" != "$package" ]; then
-        yq -i ".packages[$package_index].name = \"$package\"" "$CONFIG_FILE"
+    if [ "$(yq ".packages[$package_index].name" "$LIST_FILE")" != "$package" ]; then
+        yq -i ".packages[$package_index].name = \"$package\"" "$LIST_FILE"
     fi
 
     # Check directory
     local dir_index
-    dir_index="$(yq ".packages[$package_index].directories | to_entries[] | select(.value.path == \"$directory\") | key" "$CONFIG_FILE")"
+    dir_index="$(yq ".packages[$package_index].directories | to_entries[] | select(.value.path == \"$directory\") | key" "$LIST_FILE")"
 
     if [ "$dir_index" = '' ]; then
-        dir_index="$(yq ".packages[$package_index].directories | length" "$CONFIG_FILE")"
+        dir_index="$(yq ".packages[$package_index].directories | length" "$LIST_FILE")"
     fi
 
-    if [ "$(yq ".packages[$package_index].directories[$dir_index].path" "$CONFIG_FILE")" != "$directory" ]; then
-        yq -i ".packages[$package_index].directories[$dir_index].path = \"$directory\"" "$CONFIG_FILE"
+    if [ "$(yq ".packages[$package_index].directories[$dir_index].path" "$LIST_FILE")" != "$directory" ]; then
+        yq -i ".packages[$package_index].directories[$dir_index].path = \"$directory\"" "$LIST_FILE"
     fi
 
     # Check file
     local file_index
-    file_index="$(yq ".packages[$package_index].directories[$dir_index].files | to_entries[] | select(.value == \"$filename\") | key" "$CONFIG_FILE")"
+    file_index="$(yq ".packages[$package_index].directories[$dir_index].files | to_entries[] | select(.value == \"$filename\") | key" "$LIST_FILE")"
 
     if [ "$file_index" = '' ]; then
-        file_index="$(yq ".packages[$package_index].directories[$dir_index].files | length" "$CONFIG_FILE")"
-        yq -i ".packages[$package_index].directories[$dir_index].files[$file_index] = \"$filename\"" "$CONFIG_FILE"
-        echo "Added [$package] $directory/$filename."
+        file_index="$(yq ".packages[$package_index].directories[$dir_index].files | length" "$LIST_FILE")"
+        yq -i ".packages[$package_index].directories[$dir_index].files[$file_index] = \"$filename\"" "$LIST_FILE"
+        echo "Added: [$package] $directory/$filename."
     else
         echo "File already exists."
     fi
@@ -101,24 +110,24 @@ remove() {
 
     directory=$(convert_home_dir_to_home_env "$directory")
 
-    if [ ! "$(yq "[.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | . == \"$filename\"] | any" "$CONFIG_FILE")" == "true" ]; then
+    if [ ! "$(yq "[.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | . == \"$filename\"] | any" "$LIST_FILE")" == "true" ]; then
         echo "[$package] $directory/$filename not exists."
         return
     fi
 
     # Remove file
-    yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | select(. == \"$filename\"))" "$CONFIG_FILE"
+    yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files[] | select(. == \"$filename\"))" "$LIST_FILE"
 
     # Remove directory if files is empty
-    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$CONFIG_FILE")" -eq 0 ]; then
-        yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\"))" "$CONFIG_FILE"
+    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$LIST_FILE")" -eq 0 ]; then
+        yq -i "del(.packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\"))" "$LIST_FILE"
     fi
     # Remove package if directories is empty
-    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$CONFIG_FILE")" -eq 0 ]; then
-        yq -i "del(.packages[] | select(.name == \"$package\"))" "$CONFIG_FILE"
+    if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$LIST_FILE")" -eq 0 ]; then
+        yq -i "del(.packages[] | select(.name == \"$package\"))" "$LIST_FILE"
     fi
 
-    echo "Removeed [$package] $directory/$filename."
+    echo "Removed: [$package] $directory/$filename."
 }
 
 # Add file recursively
@@ -141,12 +150,86 @@ remove_recursive() {
     done
 }
 
+# Sync symbolick link
+sync() {
+    local pkgs_length
+    pkgs_length="$(yq ".packages | length" "$LIST_FILE")"
+
+    local pkg_idx=0
+    while [[ $pkg_idx -lt $pkgs_length ]]
+    do
+        local pkg
+        pkg="$(yq ".packages[$pkg_idx].name" "$LIST_FILE")"
+        echo "[$pkg]"
+
+        local dirs_length=0
+        dirs_length="$(yq ".packages[$pkg_idx].directories | length" "$LIST_FILE")"
+
+        local dir_idx=0
+        while [[ $dir_idx -lt $dirs_length ]]
+        do
+            local dir
+            dir="$(yq ".packages[$pkg_idx].directories[$dir_idx].path" "$LIST_FILE")"
+            dir="$(convert_home_env_to_home_dir "$dir")"
+            local files_length=0
+            files_length="$(yq ".packages[$pkg_idx].directories[$dir_idx].files | length" "$LIST_FILE")"
+
+            local file_idx=0
+            while [[ $file_idx -lt $files_length ]]
+            do
+                local file
+                file="$(yq ".packages[$pkg_idx].directories[$dir_idx].files[$file_idx]" "$LIST_FILE")"
+
+                local target
+                target="$dir/$file"
+                echo "target: $target"
+
+                # If file not exists
+                if [ ! -f "$target" ]; then
+                    echo "Not exists: $target"
+                    echo "---------------------------------------------------------"
+                    _=$(( file_idx++ )) && continue # Temporary
+                fi
+
+                local base
+                base="$(readlink -e "$dir/$file")"
+
+                # Create symbolick link
+                local repo
+                repo="$DF_ROOT/$pkg/$file"
+                # echo "$repo"
+
+                # Create repo directory if not exists
+                if [ ! -f "$(dirname "$repo")" ]; then
+                    mkdir -p "$(dirname "$repo")"
+                fi
+
+                if [ -f "$repo" ] && [ "$base" = "$repo" ]; then
+                    echo "skipped: $repo"
+                    echo "---------------------------------------------------------"
+                    _=$(( file_idx++ )) && continue # Temporary
+                fi
+
+                mv "$base" "$repo"
+                ln -fnvs "$repo" "$target"
+                echo "---------------------------------------------------------"
+
+                _=$(( file_idx++ ))
+            done
+
+            _=$(( dir_idx++ ))
+        done
+
+        _=$(( pkg_idx++ ))
+    done
+}
+
 # Main
 
 # Create file if not exists
-if [ ! -f "$CONFIG_FILE" ]; then
-    mkdir -p "$(dirname "$CONFIG_FILE")"
-    yq --null-input '{"packages": []}' > "$CONFIG_FILE"
+if [ ! -f "$LIST_FILE" ]; then
+    mkdir -p "$(dirname "$LIST_FILE")"
+    yq --null-input '{"packages": []}' > "$LIST_FILE"
 fi
 
 case "$1" in
@@ -184,8 +267,24 @@ case "$1" in
         fi
         ;;
 
+    sync)
+        sync
+        ;;
+
     show)
-        bat "$CONFIG_FILE"
+        bat "$LIST_FILE"
+        ;;
+
+    edit)
+        "${EDITOR:-vi}" "$LIST_FILE"
+        ;;
+
+    help)
+        show_usage
+        ;;
+
+    "--help")
+        show_usage
         ;;
 
     *)
