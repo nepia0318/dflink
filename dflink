@@ -8,7 +8,7 @@ DF_ROOT=${DF_ROOT%/}
 
 # Show command usage
 show_usage() {
-    echo "Usage: $0 {add|rm} [-r] [package] [file|directory]"
+    echo "Usage: $0 {add|rm} [-r] [package] [dirctory(default: '.')] [file|directory]"
     echo "  add: Add a file or directory to the list"
     echo "      -r: Recursive operation (for directories)"
     echo "  rm: Remove a file or directory from the list"
@@ -173,7 +173,6 @@ remove_recursive() {
 
 # Sync symbolick link
 sync() {
-    echo "WIP" && exit
     local pkgs_length
     pkgs_length="$(yq ".packages | length" "$LIST_FILE")"
 
@@ -192,34 +191,36 @@ sync() {
         do
             local dir
             dir="$(yq ".packages[$pkg_idx].directories[$dir_idx].path" "$LIST_FILE")"
-            dir="$(convert_home_env_to_home_dir "$dir")"
             local files_length=0
             files_length="$(yq ".packages[$pkg_idx].directories[$dir_idx].files | length" "$LIST_FILE")"
 
             local file_idx=0
             while [[ $file_idx -lt $files_length ]]
             do
+                local target_dir
+                target_dir="$(yq ".packages[$pkg_idx].directories[$dir_idx].files[$file_idx].target_dir" "$LIST_FILE")"
+                target_dir="$(convert_home_env_to_home_dir "$target_dir")"
                 local file
-                file="$(yq ".packages[$pkg_idx].directories[$dir_idx].files[$file_idx]" "$LIST_FILE")"
+                file="$(yq ".packages[$pkg_idx].directories[$dir_idx].files[$file_idx].name" "$LIST_FILE")"
 
                 local target
-                target="$dir/$file"
+                target="$target_dir/$file"
                 echo "target: $target"
 
                 # Skip if not exists
                 if [ ! -f "$target" ]; then
-                    echo "Not exists: $target"
+                    echo "File not exists: $target"
                     echo "---------------------------------------------------------"
                     _=$(( file_idx++ )) && continue # Temporary
                 fi
 
                 local base
-                base="$(readlink -e "$dir/$file")"
+                base="$(readlink -e "$target_dir/$file")"
 
                 # Create symbolick link
                 local repo
-                repo="$DF_ROOT/$pkg/$file"
-                # echo "$repo"
+                repo="$DF_ROOT/$pkg/$dir/$file"
+                repo="${repo//\/.\//\/}"
 
                 # Create repo directory if not exists
                 if [ ! -f "$(dirname "$repo")" ]; then
@@ -227,7 +228,7 @@ sync() {
                 fi
 
                 if [ -f "$repo" ] && [ "$base" = "$repo" ]; then
-                    echo "skipped: $repo"
+                    echo "Already synchronizing: $repo"
                     echo "---------------------------------------------------------"
                     _=$(( file_idx++ )) && continue # Temporary
                 fi
