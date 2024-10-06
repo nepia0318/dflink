@@ -48,7 +48,6 @@ convert_home_env_to_home_dir() {
     echo "${directory/#\${HOME\}/$HOME}"
 }
 
-# Add file
 add() {
     local package="$1"
     local directory="$2"
@@ -60,8 +59,15 @@ add() {
         return
     fi
 
+    # If file is symblokc link
+    if [ -L "$file" ]; then
+        echo "This is symbolic link: $file"
+        echo "-> $(readlink -e "$file")"
+        printf "\nPlease check original file.\n"
+        return
+    fi
+
     file=$(to_absolute_path "$file")
-    # echo "$package, $directory, $file" && exit
 
     local target_dir
     target_dir=$(dirname "$file")
@@ -77,6 +83,16 @@ add() {
         echo "Containing Library: ${dup_pkgs//$'\n'/, }"
         return
     fi
+
+    if [[ "$directory" == +(.|/) ]]; then
+        directory='.'
+    fi
+
+    # Create symbolic link
+    stored_path="$DF_ROOT/$package/$directory/$filename"
+    stored_path="${stored_path//\/\.\//\/}"
+    mv "$file" "$stored_path"
+    ln -fnvs "$stored_path" "$file"
 
     # Check package
     local package_index
@@ -107,6 +123,7 @@ add() {
     yq -i ".packages[$package_index].directories[$dir_index].files[$file_index].name = \"$filename\"" "$LIST_FILE"
     echo "Added: [$package] $target_dir/$filename."
 }
+# Add file
 
 # Remove file
 remove() {
@@ -132,11 +149,14 @@ remove() {
     local directory
     directory="$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\") | parent(2) | .path" "$LIST_FILE")"
 
+    # Remove symbolic link and Restore original file
+    stored_path="$DF_ROOT/$package/$directory/$filename"
+    stored_path="${stored_path//\/\.\//\/}"
+    rm "$file"
+    mv "$stored_path" "$file"
+
     # Remove file
     yq -i "del(.packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\"))" "$LIST_FILE"
-
-    # echo "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$LIST_FILE")"
-    # echo "$(yq ".packages[] | select(.name == \"$package\") | .directories | length" "$LIST_FILE")"
 
     # Remove directory if files is empty
     if [ "$(yq ".packages[] | select(.name == \"$package\") | .directories[] | select(.path == \"$directory\") | .files | length" "$LIST_FILE")" -eq 0 ]; then
@@ -247,6 +267,7 @@ sync() {
     done
 }
 
+# listに記載されているか確認
 repo_check() {
     find "$DF_ROOT" -maxdepth 1 -type d  -print0 | while IFS= read -r -d '' dir; do
         if [ "$dir" = "${DF_ROOT}" ]; then
@@ -256,13 +277,22 @@ repo_check() {
         pkg="${dir#"${DF_ROOT}/"}"
         echo "[$pkg]"
         find "$dir" -type f -name '???*' -print0 | while IFS= read -r -d '' file; do
-            local rel_path
-            rel_path=$(convert_home_dir_to_home_env "$(dirname "$file")")
-            echo "path: $rel_path"
-            rel_dir=$(dirname "${file#"${DF_ROOT}/$pkg"}")
-            echo "dir: $rel_dir"
+            # echo "path: $file"
+            rel_dir=$(dirname "${file#"${DF_ROOT}/$pkg/"}")
             filename=$(basename "$file")
-            echo "name: $filename"
+            local target_dir
+            target_dir="$(convert_home_env_to_home_dir "$(yq ".packages[] | select(.name == \"$pkg\") | .directories[] | select(.path == \"$rel_dir\") | .files[] | select(.name == \"$filename\") | .target_dir" "$LIST_FILE")")"
+
+            local linkbase
+            linkbase="$(readlink -e "$target_dir/$filename")"
+            if [ "$file" == "$linkbase" ]; then
+                continue
+            fi
+
+            echo "Not synchronized: $file"
+            # Reconvert target from link to original file
+            # mv $file in $target_dir
+            # rm #$target
         done
     done
 }
