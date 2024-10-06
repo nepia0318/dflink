@@ -74,6 +74,7 @@ add() {
     local filename
     filename=$(basename "$file")
 
+    # Check system file
     local isSystem=false
     if [[ ! "$target_dir" == "${HOME}"* ]]; then
         isSystem=true
@@ -147,6 +148,7 @@ remove() {
     local filename
     filename=$(basename "$file")
 
+    # Check system file
     local isSystem=false
     if [[ ! "$target_dir" == "${HOME}"* ]]; then
         isSystem=true
@@ -263,6 +265,11 @@ sync() {
                 target="$target_dir/$file"
                 echo "target: $target"
 
+                local isSystem=false
+                if [[ ! "$target_dir" == "${HOME}"* ]]; then
+                    isSystem=true
+                fi
+
                 # Check if already synchronized
                 local base
                 base="$(readlink -e "$target_dir/$file")"
@@ -273,11 +280,18 @@ sync() {
                     _=$(( file_idx++ )) && continue # Temporary
                 fi
 
-                if [ -f "$target" ]; then
-                    cp "$target" "dflink_backup_$target"
+                if "$isSystem"; then
+                    if [ -f "$target" ]; then
+                        sudo cp "$target" "dflink_backup_$target"
+                    fi
+                    sudo ln -fnvs "$repo" "$target"
+                else
+                    if [ -f "$target" ]; then
+                        cp "$target" "dflink_backup_$target"
+                    fi
+                    ln -fnvs "$repo" "$target"
                 fi
 
-                ln -fnvs "$repo" "$target"
                 echo "---------------------------------------------------------"
 
                 _=$(( file_idx++ ))
