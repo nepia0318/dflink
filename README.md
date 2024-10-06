@@ -16,11 +16,11 @@ CLI tool for manage symbolic link for dotfiles.
 ### Add
 
 ``` zsh
-    dflink add [-r] [package] [file]
+    dflink add [-r] [package] [package directory(default: '.')] [file/dirctory]
 ```
 
 ### Remove
 
 ``` zsh
-    dflink rm [-r] [package] [file]
+    dflink rm [-r] [file/directory]
 ```
