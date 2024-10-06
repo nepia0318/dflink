@@ -420,6 +420,9 @@ case "$1" in
         show_usage
         ;;
 
+    "--version")
+        echo "dflink version 0.0.1"
+        ;;
     *)
         echo "Error: Invalid command '$1'"
         show_usage
