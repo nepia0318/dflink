@@ -268,7 +268,7 @@ sync() {
     done
 }
 
-# listに記載されているか確認
+# Check if file in repo is listed
 repo_check() {
     find "$DF_ROOT" -maxdepth 1 -type d  -print0 | while IFS= read -r -d '' dir; do
         if [ "$dir" = "${DF_ROOT}" ]; then
@@ -281,6 +281,14 @@ repo_check() {
             # echo "path: $file"
             rel_dir=$(dirname "${file#"${DF_ROOT}/$pkg/"}")
             filename=$(basename "$file")
+
+            local target
+            target="$(convert_home_env_to_home_dir "$(yq ".packages[] | select(.name == \"$pkg\") | .directories[] | select(.path == \"$rel_dir\") | .files[] | select(.name == \"$filename\")" "$LIST_FILE")")"
+            if [ "$target" = '' ]; then
+                echo "Untracked: $file"
+                continue
+            fi
+
             local target_dir
             target_dir="$(convert_home_env_to_home_dir "$(yq ".packages[] | select(.name == \"$pkg\") | .directories[] | select(.path == \"$rel_dir\") | .files[] | select(.name == \"$filename\") | .target_dir" "$LIST_FILE")")"
 
@@ -290,10 +298,7 @@ repo_check() {
                 continue
             fi
 
-            echo "Not synchronized: $file"
-            # Reconvert target from link to original file
-            # mv $file in $target_dir
-            # rm #$target
+            echo "Untracked: $file"
         done
     done
 }
