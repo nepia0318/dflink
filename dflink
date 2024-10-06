@@ -280,6 +280,8 @@ sync() {
                     _=$(( file_idx++ )) && continue # Temporary
                 fi
 
+                #Create Symbolic link (if file already exists, take a backup)
+                mkdir -p "$(dirname "$target")"
                 if "$isSystem"; then
                     if [ -f "$target" ]; then
                         sudo cp "$target" "dflink_backup_$target"
