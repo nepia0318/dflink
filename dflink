@@ -74,7 +74,12 @@ add() {
     local filename
     filename=$(basename "$file")
 
-    target_dir=$(convert_home_dir_to_home_env "$target_dir")
+    local isSystem=false
+    if [[ ! "$target_dir" == "${HOME}"* ]]; then
+        isSystem=true
+    else
+        target_dir=$(convert_home_dir_to_home_env "$target_dir")
+    fi
 
     local dup_pkgs
     dup_pkgs="$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\") | parent(4) | .name" "$LIST_FILE")"
@@ -92,8 +97,14 @@ add() {
     stored_path="$DF_ROOT/$package/$directory/$filename"
     stored_path="${stored_path//\/\.\//\/}"
     mkdir -p "$(dirname "$stored_path")"
-    mv "$file" "$stored_path"
-    ln -fnvs "$stored_path" "$file"
+
+    if "$isSystem"; then
+        sudo mv "$file" "$stored_path"
+        sudo ln -fnvs "$stored_path" "$file"
+    else
+        mv "$file" "$stored_path"
+        ln -fnvs "$stored_path" "$file"
+    fi
 
     # Check package
     local package_index
@@ -136,11 +147,16 @@ remove() {
     local filename
     filename=$(basename "$file")
 
-    target_dir=$(convert_home_dir_to_home_env "$target_dir")
+    local isSystem=false
+    if [[ ! "$target_dir" == "${HOME}"* ]]; then
+        isSystem=true
+    else
+        target_dir=$(convert_home_dir_to_home_env "$target_dir")
+    fi
 
     # If file isn't exists.
     if [ "$(yq ".packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\")" "$LIST_FILE")" == '' ]; then
-        echo "File not exists: $target_dir/$filename."
+        echo "File not exists in list: $target_dir/$filename."
         return
     fi
 
@@ -153,8 +169,14 @@ remove() {
     # Remove symbolic link and Restore original file
     stored_path="$DF_ROOT/$package/$directory/$filename"
     stored_path="${stored_path//\/\.\//\/}"
-    rm "$file"
-    mv "$stored_path" "$file"
+
+    if "$isSystem"; then
+        sudo rm "$file"
+        sudo mv "$stored_path" "$file"
+    else
+        rm "$file"
+        mv "$stored_path" "$file"
+    fi
 
     # Remove file
     yq -i "del(.packages[].directories[].files[] | select(.target_dir == \"$target_dir\" and .name == \"$filename\"))" "$LIST_FILE"
@@ -304,6 +326,14 @@ repo_check() {
 }
 
 # Main
+
+# Check yq comannd installed
+
+if ! command -v yq &> /dev/null; then
+    echo "command 'yq' is not found."
+    echo "abort."
+    exit
+fi
 
 # Create file if not exists
 if [ ! -f "$LIST_FILE" ]; then
