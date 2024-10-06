@@ -91,6 +91,7 @@ add() {
     # Create symbolic link
     stored_path="$DF_ROOT/$package/$directory/$filename"
     stored_path="${stored_path//\/\.\//\/}"
+    mkdir -p "$(dirname "$stored_path")"
     mv "$file" "$stored_path"
     ln -fnvs "$stored_path" "$file"
 
@@ -191,7 +192,7 @@ remove_recursive() {
     done
 }
 
-# Sync symbolick link
+# Synchronize symbolick link with list
 sync() {
     local pkgs_length
     pkgs_length="$(yq ".packages | length" "$LIST_FILE")"
@@ -223,37 +224,37 @@ sync() {
                 local file
                 file="$(yq ".packages[$pkg_idx].directories[$dir_idx].files[$file_idx].name" "$LIST_FILE")"
 
-                local target
-                target="$target_dir/$file"
-                echo "target: $target"
-
-                # Skip if not exists
-                if [ ! -f "$target" ]; then
-                    echo "File not exists: $target"
-                    echo "---------------------------------------------------------"
-                    _=$(( file_idx++ )) && continue # Temporary
-                fi
-
-                local base
-                base="$(readlink -e "$target_dir/$file")"
-
                 # Create symbolick link
                 local repo
                 repo="$DF_ROOT/$pkg/$dir/$file"
                 repo="${repo//\/.\//\/}"
 
-                # Create repo directory if not exists
-                if [ ! -f "$(dirname "$repo")" ]; then
-                    mkdir -p "$(dirname "$repo")"
+                # Skip if not exists in repo
+                if [ ! -f "$repo" ]; then
+                    echo "[ERROR] File is listed bat not exists: $repo"
+                    echo "---------------------------------------------------------"
+                    _=$(( file_idx++ )) && continue # Temporary
                 fi
 
-                if [ -f "$repo" ] && [ "$base" = "$repo" ]; then
+                # Display target file
+                local target
+                target="$target_dir/$file"
+                echo "target: $target"
+
+                # Check if already synchronized
+                local base
+                base="$(readlink -e "$target_dir/$file")"
+
+                if [ "$base" = "$repo" ]; then
                     echo "Already synchronizing: $repo"
                     echo "---------------------------------------------------------"
                     _=$(( file_idx++ )) && continue # Temporary
                 fi
 
-                mv "$base" "$repo"
+                if [ -f "$target" ]; then
+                    cp "$target" "dflink_backup_$target"
+                fi
+
                 ln -fnvs "$repo" "$target"
                 echo "---------------------------------------------------------"
 
